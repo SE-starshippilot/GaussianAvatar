@@ -58,7 +58,7 @@ def getProjectionMatrix(znear, zfar, fovX, fovY, K, h, w):
         bottom = (K[1, 2] - h) * near_fy
         top = K[1, 2] * near_fy
 
-    P = torch.zeros(4, 4)
+    P = np.zeros((4, 4))
 
     z_sign = 1.0
 
@@ -69,6 +69,7 @@ def getProjectionMatrix(znear, zfar, fovX, fovY, K, h, w):
     P[3, 2] = z_sign
     P[2, 2] = z_sign * zfar / (zfar - znear)
     P[2, 3] = -(zfar * znear) / (zfar - znear)
+    P = torch.tensor(P, dtype=torch.float32)
     return P
 
 def getProjectionMatrix_ori(znear, zfar, fovX, fovY):
