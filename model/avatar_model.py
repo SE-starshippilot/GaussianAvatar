@@ -6,7 +6,7 @@ import numpy as np
 import torch.nn as nn
 from submodules import smplx
 import trimesh
-from scene.dataset_mono import MonoDataset_train, MonoDataset_test, MonoDataset_novel_pose, MonoDataset_novel_view
+from scene.dataset_mono import MonoDataset_recon_pose, MonoDataset_train, MonoDataset_test, MonoDataset_novel_pose, MonoDataset_novel_view
 from utils.general_utils import worker_init_fn
 from utils.system_utils import mkdir_p
 from model.network import POP_no_unet
@@ -256,6 +256,10 @@ class AvatarModel:
     def getNovelviewDataset(self,):
         self.novel_view_dataset = MonoDataset_novel_view(self.model_parms)
         return self.novel_view_dataset
+    
+    def getReconDataset(self,):
+        self.recon_dataset = MonoDataset_recon_pose(self.model_parms)
+        return self.recon_dataset
 
     def zero_grad(self, epoch):
         self.optimizer.zero_grad()

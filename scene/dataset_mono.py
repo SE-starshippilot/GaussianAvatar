@@ -461,6 +461,8 @@ class MonoDataset_novel_pose(Dataset):
             self.R = np.array(extr_npy[:3, :3], np.float32).reshape(3, 3).transpose(1, 0)
             self.T = np.array([extr_npy[:3, 3]], np.float32)
             self.intrinsic = np.array(intr_npy, np.float32).reshape(3, 3)
+            self.width = cam_npy.get('width', 1024)
+            self.height = cam_npy.get('height', 1024)
         
 
         
@@ -469,7 +471,7 @@ class MonoDataset_novel_pose(Dataset):
 
     def __getitem__(self, index, ignore_list=None):
         return self.getitem(index, ignore_list)
-
+    
     @torch.no_grad()
     def getitem(self, index, ignore_list):
 
@@ -489,7 +491,7 @@ class MonoDataset_novel_pose(Dataset):
         transl_data = self.transl_data[pose_idx]
 
 
-        width, height = 1024, 1024
+        width, height = self.width, self.height
 
         FovY = focal2fov(focal_length_y, height)
         FovX = focal2fov(focal_length_x, width)
@@ -521,6 +523,124 @@ class MonoDataset_novel_pose(Dataset):
         
         return data_item
 
+class MonoDataset_recon_pose(Dataset):
+    @torch.no_grad()
+    def __init__(self, dataset_parms,
+                 device = torch.device('cuda:0')):
+        super(MonoDataset_recon_pose, self).__init__()
+
+
+        self.dataset_parms = dataset_parms
+        self.data_folder = dataset_parms.test_folder
+        self.device = device
+        self.gender = self.dataset_parms.smpl_gender
+
+        self.zfar = 100.0
+        self.znear = 0.01
+        self.trans = np.array([0.0, 0.0, 0.0]),
+        self.scale = 1.0
+
+        self.no_mask = bool(self.dataset_parms.no_mask)
+
+        print('loading smpl data ', join(self.data_folder, 'smpl_parms.pth'))
+        self.smpl_data = torch.load(join(self.data_folder, 'smpl_parms.pth'), weights_only=True)
+
+        self.data_length = self.smpl_data['body_pose'].shape[0]
+        print("total pose length", self.data_length )
+
+        if dataset_parms.smpl_type == 'smplx':
+
+            self.pose_data = self.smpl_data['body_pose'][:self.data_length, :66]
+            self.transl_data = self.smpl_data['trans'][:self.data_length,:]
+            self.rest_pose_data = self.smpl_data['body_pose'][:self.data_length, 66:]
+        else:
+            self.pose_data = self.smpl_data['body_pose']
+            self.transl_data = self.smpl_data['trans']
+            # self.rest_pose_data = self.smpl_data['body_pose'][:self.data_length, 66:]
+
+        print('novel pose shape', self.pose_data.shape)
+
+
+        if dataset_parms.cam_static:
+            cam_path = join(self.data_folder, 'cam_parms.npz')
+            cam_npy = np.load(cam_path)
+            extr_npy = cam_npy['extrinsic']
+            intr_npy = cam_npy['intrinsic']
+            
+            # translation_adjustment = np.array([0, .4, 0])  # Adjust these values as needed
+            # extr_npy[:3, 3] += translation_adjustment
+
+            self.R = np.array(extr_npy[:3, :3], np.float32).reshape(3, 3).transpose(1, 0)
+            self.T = np.array([extr_npy[:3, 3]], np.float32)
+            self.intrinsic = np.array(intr_npy, np.float32).reshape(3, 3)
+        
+
+        
+    def __len__(self):
+        return self.data_length
+
+    def __getitem__(self, index, ignore_list=None):
+        return self.getitem(index, ignore_list)
+
+    def get_width_height(self):
+        image_dir = join(self.dataset_parms.source_path, 'train', 'images')
+        image_name = os.listdir(image_dir)[0]
+        image_path = join(image_dir, image_name)
+        image = Image.open(image_path)
+        width, height = image.size
+        return width, height
+
+    @torch.no_grad()
+    def getitem(self, index, ignore_list):
+
+        pose_idx  =  index
+        if self.dataset_parms.train_stage == 2:
+            inp_posmap_path = self.data_folder + '/inp_map/' +'inp_posemap_%s_%s.npz'% (str(self.dataset_parms.inp_posmap_size), str(pose_idx).zfill(8)) # fixed posemap
+            inp_posmap = np.load(inp_posmap_path)['posmap' + str(self.dataset_parms.inp_posmap_size)]
+
+        R = self.R
+        T = self.T
+        intrinsic = self.intrinsic
+
+        focal_length_x = intrinsic[0, 0]
+        focal_length_y = intrinsic[1, 1]
+
+        pose_data = self.pose_data[pose_idx]
+        transl_data = self.transl_data[pose_idx]
+
+
+        width, height = self.get_width_height()
+
+        FovY = focal2fov(focal_length_y, height)
+        FovX = focal2fov(focal_length_x, width)
+
+
+        data_item = dict()
+        if self.dataset_parms.train_stage == 2:
+            data_item['inp_pos_map'] = inp_posmap.transpose(2,0,1)
+
+        data_item['FovX'] = FovX
+        data_item['FovY'] = FovY
+        data_item['width'] = width
+        data_item['height'] = height
+        data_item['pose_idx'] = pose_idx
+        data_item['pose_data'] = pose_data
+        data_item['transl_data'] = transl_data
+        if self.dataset_parms.smpl_type == 'smplx':
+            rest_pose = self.rest_pose_data[pose_idx]
+            data_item['rest_pose'] = rest_pose
+  
+        world_view_transform = torch.tensor(getWorld2View2(R, T, self.trans, self.scale)).transpose(0, 1)
+        projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=FovX, fovY=FovY, K=intrinsic, h=height, w=width).transpose(0,1)
+        full_proj_transform = (world_view_transform.unsqueeze(0).bmm(projection_matrix.unsqueeze(0))).squeeze(0)
+        camera_center = world_view_transform.inverse()[3, :3]
+        data_item['world_view_transform'] = world_view_transform
+        data_item['projection_matrix'] = projection_matrix
+        data_item['full_proj_transform'] = full_proj_transform
+        data_item['camera_center'] = camera_center
+        
+        return data_item
+    
 class MonoDataset_novel_view(Dataset):
     # these code derive from humannerf(https://github.com/chungyiweng/humannerf), to keep the same view point
     ROT_CAM_PARAMS = {
