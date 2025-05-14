@@ -1,12 +1,11 @@
-
-
-import numpy  as np
+import numpy as np
 import torch
 from os.path import join
 import os
 import sys
+import argparse
 sys.path.append('../')
-from submodules  import smplx
+from submodules import smplx
 
 from scipy.spatial.transform import Rotation as R
 import trimesh
@@ -52,7 +51,7 @@ def render_posmap(v_minimal, faces, uvs, faces_uvs, img_size=32):
     return uv_pos, uv_mask, face_id
 
 def save_obj(data_path, name):
-    smpl_data = torch.load( data_path + '/smpl_parms.pth')
+    smpl_data = torch.load( data_path + '/smpl_parms.pth', weights_only=True)
     smpl_model = smplx.SMPL(model_path ='../assets/smpl_files/smpl',batch_size = 1)
     cano_dir = os.path.join(data_path,)
 
@@ -95,18 +94,24 @@ def save_npz(data_path, res=128):
         result['posmap512'] = posmap512
 
     save_fn = join(data_path, 'query_posemap_%s_%s.npz'% (str(res), 'cano_smpl'))
+    print('saving pose map %s ...'% save_fn)
     np.savez(save_fn, **result)
 
 
 
 if __name__ == '__main__':
-    smplx_parm_path = '' # path to the folder that include smpl params
+    parser = argparse.ArgumentParser(description='Process subject.')
+    parser.add_argument('subject', type=str, help='Subject identifier', default='Dance_1')
+    args = parser.parse_args()
+
+    subject = args.subject
+    smplx_parm_paths = [join('../../assets', subject, _) for _ in ['train', 'test']]
     parms_name = 'smpl_parms.pth'
     uv_template_fn = '../assets/template_mesh_smpl_uv.obj'
-    assets_path = ''    # path to the folder that include 'assets'
 
-    print('saving obj...')
-    save_obj(smplx_parm_path, parms_name)
+    for smplx_parm_path in smplx_parm_paths:
+        print('saving obj...')
+        save_obj(smplx_parm_path, parms_name)
 
-    print('saving pose_map 512 ...')
-    save_npz(smplx_parm_path, 512)
+        print('saving pose_map 512 ...')
+        save_npz(smplx_parm_path, 512)
